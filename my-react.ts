@@ -2,7 +2,7 @@ interface Properties extends Record<string, any> {
   children: Array<MyElement>;
 }
 interface MyElement {
-  type: string;
+  type: any;
   props: Properties;
 }
 
@@ -75,17 +75,31 @@ const commitWork = (fiber?: Fiber) => {
   if (!fiber) {
     return;
   }
-  const domParent = fiber.parent.dom;
+
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+  const domParent = domParentFiber.dom;
+
   if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
     domParent.appendChild(fiber.dom);
   } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
   } else if (fiber.effectTag === "DELETION") {
-    domParent.removeChild(fiber.dom);
+    commitDeletion(fiber, domParent);
   }
   domParent.appendChild(fiber.dom);
   commitWork(fiber.child);
   commitWork(fiber.sibling);
+};
+
+const commitDeletion = (fiber: Fiber, domParent: HTMLElement | Text) => {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child, domParent);
+  }
 };
 
 export const render = (element: MyElement, container: HTMLElement) => {
@@ -208,12 +222,12 @@ const reconcileChildren = (wipFiber: Fiber, elements: Array<MyElement>) => {
 };
 
 const performUnitOfWork = (fiber: Fiber): Fiber => {
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
   }
-
-  const elements = fiber.props.children;
-  reconcileChildren(fiber, elements);
 
   if (fiber.child) {
     return fiber.child;
@@ -226,4 +240,16 @@ const performUnitOfWork = (fiber: Fiber): Fiber => {
     }
     nextFiber = nextFiber.parent;
   }
+};
+
+const updateFunctionComponent = (fiber: Fiber) => {
+  const children = [fiber.type(fiber.props)];
+  reconcileChildren(fiber, children);
+};
+
+const updateHostComponent = (fiber: Fiber) => {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  reconcileChildren(fiber, fiber.props.children);
 };
