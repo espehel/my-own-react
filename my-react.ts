@@ -6,6 +6,11 @@ interface MyElement {
   props: Properties;
 }
 
+interface Hook {
+  state: any;
+  queue: Array<Function>;
+}
+
 interface Fiber extends MyElement {
   dom?: HTMLElement | Text;
   parent?: Fiber;
@@ -13,12 +18,15 @@ interface Fiber extends MyElement {
   sibling?: Fiber;
   alternate: Fiber;
   effectTag?: "PLACEMENT" | "DELETION" | "UPDATE";
+  hooks?: Array<Hook>;
 }
 
 let nextUnitOfWork: Fiber = null;
 let wipRoot: Fiber = null;
 let currentRoot: Fiber = null;
 let deletions: Array<Fiber> = [];
+let wipFiber: Fiber = null;
+let hookIndex: number = null;
 
 const isEvent = (key) => key.startsWith("on");
 const isProperty = (key) => key !== "children" && !isEvent(key);
@@ -243,8 +251,43 @@ const performUnitOfWork = (fiber: Fiber): Fiber => {
 };
 
 const updateFunctionComponent = (fiber: Fiber) => {
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = [];
   const children = [fiber.type(fiber.props)];
   reconcileChildren(fiber, children);
+};
+
+export const useState = (initial: unknown) => {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+  const hook: Hook = {
+    state: oldHook ? oldHook.state : initial,
+    queue: [],
+  };
+
+  const actions = oldHook ? oldHook.queue : [];
+  actions.forEach((action) => {
+    hook.state = action(hook.state);
+  });
+
+  const setState = (action) => {
+    hook.queue.push(action);
+    wipRoot = {
+      type: currentRoot.type,
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      alternate: currentRoot,
+    };
+    nextUnitOfWork = wipRoot;
+    deletions = [];
+  };
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state, setState];
 };
 
 const updateHostComponent = (fiber: Fiber) => {
